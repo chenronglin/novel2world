@@ -1,0 +1,1 @@
+"""Core novel translation package."""
