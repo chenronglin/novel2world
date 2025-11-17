@@ -83,7 +83,7 @@ class DirectusCms:
                 json=value,
                 timeout=self.timeout
             )
-            return Cms._handle_response(response)
+            return DirectusCms._handle_response(response)
         except Exception as e:
             logger.error(f"创建数据项失败: {e}")
             return None
@@ -109,12 +109,12 @@ class DirectusCms:
                 headers=self.headers,
                 timeout=self.timeout
             )
-            return Cms._handle_response(response)
+            return DirectusCms._handle_response(response)
         except Exception as e:
             logger.error(f"获取数据项失败: {e}")
             return None
 
-    def get_item(self, table_name: str, item_id: int) -> Optional[Dict[str, Any]]:
+    def get_item(self, table_name: str, item_id: int|str) -> Optional[Dict[str, Any]]:
         """
         获取单个数据项
         
@@ -132,12 +132,12 @@ class DirectusCms:
                 headers=self.headers,
                 timeout=self.timeout
             )
-            return Cms._handle_response(response)
+            return DirectusCms._handle_response(response)
         except Exception as e:
             logger.error(f"获取单个数据项失败: {e}")
             return None
 
-    def update_item(self, table_name: str, item_id: int, value: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def update_item(self, table_name: str, item_id: int|str, value: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         更新数据项
         
@@ -157,12 +157,12 @@ class DirectusCms:
                 json=value,
                 timeout=self.timeout
             )
-            return Cms._handle_response(response)
+            return DirectusCms._handle_response(response)
         except Exception as e:
             logger.error(f"更新数据项失败: {e}")
             return None
 
-    def delete_item(self, table_name: str, item_id: int) -> bool:
+    def delete_item(self, table_name: str, item_id: int|str) -> bool:
         """
         删除数据项
         

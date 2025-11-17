@@ -1,56 +1,13 @@
 import re
 import os
 from typing import List, Tuple, Dict
-import requests
-import json
+from app.storage import Storage
+from app.directus_cms import DirectusCms
 
-api_key = "23d3JXNyv4w09ZHtzKStqfDPoaA-aQ6z"
-
-
-def create_chapter(project_id: str, title: str, content: str = None, chapter_number: int = None) -> dict:
-    """
-    创建新章节并提交到Directus API
-    
-    参数:
-        title: 章节标题
-        content: 章节内容（可选）
-        chapter_number: 章节号（可选）
-        
-    返回:
-        API响应的JSON数据
-        
-    异常:
-        requests.RequestException: 当请求失败时
-        ValueError: 当响应状态码不是200时
-    """
-    # API端点
-    url = "http://118.195.150.71:8055/items/chapters"
-
-    # 请求头
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
-    # 请求数据
-    data = {"project_id": project_id, "title": title, "content": content, "index": int(chapter_number)}
-
-    try:
-        # 发送POST请求
-        response = requests.post(url, headers=headers, data=json.dumps(data))
-
-        # 检查响应状态
-        response.raise_for_status()
-
-        # 返回响应的JSON数据
-        return response.json()
-
-    except requests.exceptions.RequestException as e:
-        print(f"请求失败: {e}")
-        raise
-    except ValueError as e:
-        print(f"响应解析失败: {e}")
-        raise
+# 初始化存储实例
+cms = DirectusCms(base_url="http://118.195.150.71:8055",
+                  token="23d3JXNyv4w09ZHtzKStqfDPoaA-aQ6z")
+storage = Storage(cms)
 
 
 def chinese_to_number(chinese_str: str) -> int:
@@ -291,28 +248,52 @@ def split_chapters(content: str, chapter_info: List[Tuple[int, str, int, str]]) 
     return chapters
 
 
-def print_chapters(chapters: List[Dict[str, str]]) -> None:
+def save_chapters_to_storage(chapters: List[Dict[str, str]], project_id: str) -> None:
     """
-    打印章节信息
+    将章节保存到存储系统
     
     参数:
         chapters: 章节字典列表
-        preview_length: 每章内容预览长度
+        project_id: 项目ID
     """
     print(f"\n共识别到 {len(chapters)} 章")
     print("-" * 50)
-    project_id = "d9a4ddbe-7b21-4573-a1c0-932cda657758"
     for chapter in chapters:
-        create_chapter(
-            project_id, chapter["title"], chapter["content"], int(chapter["number"]))
+        result = storage.create_chapter(
+            project_id, 
+            chapter["title"], 
+            chapter["content"], 
+            int(chapter["number"])
+        )
+        if result:
+            print(f"成功创建章节: {chapter['title']} (ID: {result.get('id')})")
+        else:
+            print(f"创建章节失败: {chapter['title']}")
 
 
 def main():
     """
     主函数，执行文档加载和章节分割
     """
-    # 默认文档路径
-    document_path = "novels/《末世异神》.txt"
+    # 获取用户输入的项目ID
+    project_id = input("请输入项目ID: ").strip()
+    if not project_id:
+        print("错误: 项目ID不能为空")
+        return None
+    
+    # 验证项目是否存在
+    project = storage.get_project(project_id)
+    if not project:
+        print(f"错误: 项目ID '{project_id}' 不存在")
+        return None
+    
+    print(f"已找到项目: {project.get('name', '未知项目')}")
+    
+    # 获取用户输入的文档路径
+    default_document_path = "novels/《末世异神》.txt"
+    document_path = input(f"请输入文档路径 (默认: {default_document_path}): ").strip()
+    if not document_path:
+        document_path = default_document_path
 
     try:
         # 加载文档
@@ -325,8 +306,8 @@ def main():
         # 分割章节
         chapters = split_chapters(content, chapter_info)
 
-        # 打印章节信息
-        print_chapters(chapters)
+        # 将章节保存到存储系统
+        save_chapters_to_storage(chapters, project_id)
 
         return chapters
 

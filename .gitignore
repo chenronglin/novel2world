@@ -10,3 +10,4 @@ wheels/
 .venv
 .factory
 .idea
+**/.DS_Store

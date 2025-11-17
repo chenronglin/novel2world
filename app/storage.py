@@ -1,396 +1,481 @@
-from __future__ import annotations
+"""
+小说翻译项目的数据存储模块
 
-import json
-import sqlite3
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Iterable, List, Optional
+该模块提供对Directus CMS的CRUD操作封装，用于管理小说翻译项目的数据，
+包括项目、章节、术语表和翻译结果的数据操作。
+"""
 
-from .models import (
-    Chapter,
-    Project,
-    TerminologyEntry,
-    TranslationResult,
-    TranslationStage,
-    utc_now,
-)
+from typing import Dict, Any, List, Optional, Union
+import logging
 
+from .directus_cms import DirectusCms
+from .models import TranslationStage, GlossaryType
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "app.db"
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-def _ensure_timezone(dt: datetime) -> datetime:
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
-def _to_iso(dt: datetime) -> str:
-    return _ensure_timezone(dt).isoformat()
-
-
-def _from_iso(value: Optional[str]) -> Optional[datetime]:
-    if not value:
+class Storage:
+    """小说翻译项目数据存储类
+    
+    提供对小说翻译项目数据的CRUD操作，包括项目、章节、术语表和翻译结果的管理。
+    """
+    
+    def __init__(self, cms_client: DirectusCms):
+        """
+        初始化存储类
+        
+        Args:
+            cms_client: Directus CMS客户端实例
+        """
+        self.cms = cms_client
+    
+    # ==================== 项目相关操作 ====================
+    
+    def create_project(self, project_id: str, name: str, author: str = "", genre: str = "",
+                      description: str = "", source_language: str = "zh", 
+                      target_language: str = "en", metadata: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+        """
+        创建新的翻译项目
+        
+        Args:
+            project_id: 项目唯一标识符
+            name: 小说名称
+            author: 小说作者
+            genre: 小说类型/流派
+            description: 小说简介/描述
+            source_language: 源语言，默认为中文
+            target_language: 目标语言，默认为英文
+            metadata: 项目元数据，存储额外信息
+            
+        Returns:
+            创建成功返回项目数据字典，失败返回None
+        """
+        project_data = {
+            "id": project_id,
+            "name": name,
+            "author": author,
+            "genre": genre,
+            "description": description,
+            "source_language": source_language,
+            "target_language": target_language,
+            "metadata": metadata or {}
+        }
+        
+        return self.cms.create_item("projects", project_data)
+    
+    def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取单个项目信息
+        
+        Args:
+            project_id: 项目唯一标识符
+            
+        Returns:
+            成功返回项目数据字典，失败返回None
+        """
+        return self.cms.get_item("projects", project_id)
+    
+    def update_project(self, project_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+        """
+        更新项目信息
+        
+        Args:
+            project_id: 项目唯一标识符
+            **kwargs: 要更新的项目字段
+            
+        Returns:
+            更新成功返回项目数据字典，失败返回None
+        """
+        return self.cms.update_item("projects", project_id, kwargs)
+    
+    def list_projects(self, limit: int = 25, offset: int = 0) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取项目列表
+        
+        Args:
+            limit: 返回记录数限制
+            offset: 偏移量
+            
+        Returns:
+            成功返回项目数据列表，失败返回None
+        """
+        query = f"limit={limit}&offset={offset}"
+        result = self.cms.get_items("projects", query)
+        return result if isinstance(result, list) else None
+    
+    def delete_project(self, project_id: str) -> bool:
+        """
+        删除项目
+        
+        Args:
+            project_id: 项目唯一标识符
+            
+        Returns:
+            删除成功返回True，失败返回False
+        """
+        return self.cms.delete_item("projects", project_id)
+    
+    # ==================== 章节相关操作 ====================
+    
+    def create_chapter(self, project_id: str, title: str, content: str = None, 
+                      chapter_number: int = None, summary: str = "", 
+                      characters: List[str] = None, terminologies: List[str] = None,
+                      metadata: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+        """
+        创建新的章节
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            title: 章节标题
+            content: 章节原始内容
+            chapter_number: 章节顺序索引，从1开始
+            summary: 章节内容摘要
+            characters: 章节中出现的角色列表
+            terminologies: 章节中出现的术语列表
+            metadata: 章节元数据，存储额外信息
+            
+        Returns:
+            创建成功返回章节数据字典，失败返回None
+        """
+        chapter_data = {
+            "project_id": project_id,
+            "title": title,
+            "content": content or "",
+            "index": chapter_number or 1,
+            "summary": summary,
+            "characters": characters or [],
+            "terminologies": terminologies or [],
+            "metadata": metadata or {}
+        }
+        
+        return self.cms.create_item("chapters", chapter_data)
+    
+    def get_chapter(self, project_id: str, chapter_index: int) -> Optional[Dict[str, Any]]:
+        """
+        获取单个章节信息
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            chapter_index: 章节顺序索引
+            
+        Returns:
+            成功返回章节数据字典，失败返回None
+        """
+        # 通过项目ID和章节索引查询
+        query = f"filter[project_id][_eq]={project_id}&filter[index][_eq]={chapter_index}"
+        result = self.cms.get_items("chapters", query)
+        
+        if isinstance(result, list) and len(result) > 0:
+            return result[0]
         return None
-    return datetime.fromisoformat(value)
-
-
-def _json_dump(data) -> str:
-    return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-
-
-def _json_load(data: Optional[str], default):
-    if data is None:
-        return default
-    try:
-        return json.loads(data)
-    except json.JSONDecodeError:
-        return default
-
-
-class SqliteStorage:
-    def __init__(self, db_path: Optional[str | Path] = None) -> None:
-        self.db_path = Path(db_path or DEFAULT_DB_PATH)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA foreign_keys = ON")
-        self._ensure_schema()
-
-    def __enter__(self) -> "SqliteStorage":
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        self.close()
-
-    def close(self) -> None:
-        self._conn.close()
-
-    def _ensure_schema(self) -> None:
-        cursor = self._conn.cursor()
-        cursor.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS projects (
-                project_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                source_language TEXT NOT NULL,
-                target_language TEXT NOT NULL,
-                metadata TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS chapters (
-                project_id TEXT NOT NULL,
-                chapter_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                summary TEXT DEFAULT '',
-                content TEXT NOT NULL,
-                characters TEXT,
-                terminology_keys TEXT,
-                metadata TEXT,
-                PRIMARY KEY (project_id, chapter_id),
-                FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS terminology_entries (
-                entry_id TEXT PRIMARY KEY,
-                project_id TEXT NOT NULL,
-                source_term TEXT NOT NULL,
-                approved_translation TEXT NOT NULL,
-                variants TEXT,
-                part_of_speech TEXT,
-                notes TEXT,
-                metadata TEXT,
-                FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS translation_results (
-                project_id TEXT NOT NULL,
-                chapter_id TEXT NOT NULL,
-                stage TEXT NOT NULL,
-                content TEXT NOT NULL,
-                validation TEXT,
-                metadata TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (project_id, chapter_id, stage),
-                FOREIGN KEY (project_id, chapter_id)
-                    REFERENCES chapters(project_id, chapter_id) ON DELETE CASCADE
-            );
-            """
-        )
-        self._conn.commit()
-
-    # Projects
-    def upsert_project(self, project: Project) -> None:
-        self._conn.execute(
-            """
-            INSERT INTO projects (project_id, name, description, source_language, target_language, metadata)
-            VALUES (:project_id, :name, :description, :source_language, :target_language, :metadata)
-            ON CONFLICT(project_id) DO UPDATE SET
-                name=excluded.name,
-                description=excluded.description,
-                source_language=excluded.source_language,
-                target_language=excluded.target_language,
-                metadata=excluded.metadata
-            """,
-            {
-                "project_id": project.project_id,
-                "name": project.name,
-                "description": project.description,
-                "source_language": project.source_language,
-                "target_language": project.target_language,
-                "metadata": _json_dump(project.metadata),
-            },
-        )
-        self._conn.commit()
-
-    def get_project(self, project_id: str) -> Optional[Project]:
-        row = self._conn.execute(
-            "SELECT * FROM projects WHERE project_id = ?",
-            (project_id,),
-        ).fetchone()
-        if not row:
+    
+    def update_chapter(self, project_id: str, chapter_index: int, **kwargs) -> Optional[Dict[str, Any]]:
+        """
+        更新章节信息
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            chapter_index: 章节顺序索引
+            **kwargs: 要更新的章节字段
+            
+        Returns:
+            更新成功返回章节数据字典，失败返回None
+        """
+        # 先获取章节ID
+        chapter = self.get_chapter(project_id, chapter_index)
+        if not chapter:
+            logger.error(f"未找到项目 {project_id} 的第 {chapter_index} 章")
             return None
-        return Project(
-            project_id=row["project_id"],
-            name=row["name"],
-            description=row["description"],
-            source_language=row["source_language"],
-            target_language=row["target_language"],
-            metadata=_json_load(row["metadata"], {}),
-        )
-
-    def list_projects(self) -> List[Project]:
-        rows = self._conn.execute("SELECT * FROM projects ORDER BY project_id").fetchall()
-        return [
-            Project(
-                project_id=row["project_id"],
-                name=row["name"],
-                description=row["description"],
-                source_language=row["source_language"],
-                target_language=row["target_language"],
-                metadata=_json_load(row["metadata"], {}),
-            )
-            for row in rows
-        ]
-
-    # Chapters
-    def upsert_chapter(self, chapter: Chapter) -> None:
-        self._conn.execute(
-            """
-            INSERT INTO chapters (
-                project_id, chapter_id, title, summary, content,
-                characters, terminology_keys, metadata
-            ) VALUES (
-                :project_id, :chapter_id, :title, :summary, :content,
-                :characters, :terminology_keys, :metadata
-            ) ON CONFLICT(project_id, chapter_id) DO UPDATE SET
-                title=excluded.title,
-                summary=excluded.summary,
-                content=excluded.content,
-                characters=excluded.characters,
-                terminology_keys=excluded.terminology_keys,
-                metadata=excluded.metadata
-            """,
-            {
-                "project_id": chapter.project_id,
-                "chapter_id": chapter.chapter_id,
-                "title": chapter.title,
-                "summary": chapter.summary,
-                "content": chapter.content,
-                "characters": _json_dump(chapter.characters),
-                "terminology_keys": _json_dump(chapter.terminology_keys),
-                "metadata": _json_dump(chapter.metadata),
-            },
-        )
-        self._conn.commit()
-
-    def get_chapter(self, project_id: str, chapter_id: str) -> Optional[Chapter]:
-        row = self._conn.execute(
-            """
-            SELECT * FROM chapters
-            WHERE project_id = ? AND chapter_id = ?
-            """,
-            (project_id, chapter_id),
-        ).fetchone()
-        if not row:
+            
+        chapter_id = chapter.get("id")
+        return self.cms.update_item("chapters", chapter_id, kwargs)
+    
+    def list_chapters(self, project_id: str, limit: int = 25, offset: int = 0) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取章节列表
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            limit: 返回记录数限制
+            offset: 偏移量
+            
+        Returns:
+            成功返回章节数据列表，失败返回None
+        """
+        query = f"filter[project_id][_eq]={project_id}&limit={limit}&offset={offset}&sort=index"
+        result = self.cms.get_items("chapters", query)
+        return result if isinstance(result, list) else None
+    
+    def delete_chapter(self, project_id: str, chapter_index: int) -> bool:
+        """
+        删除章节
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            chapter_index: 章节顺序索引
+            
+        Returns:
+            删除成功返回True，失败返回False
+        """
+        # 先获取章节ID
+        chapter = self.get_chapter(project_id, chapter_index)
+        if not chapter:
+            logger.error(f"未找到项目 {project_id} 的第 {chapter_index} 章")
+            return False
+            
+        chapter_id = chapter.get("id")
+        return self.cms.delete_item("chapters", chapter_id)
+    
+    # ==================== 术语表相关操作 ====================
+    
+    def create_glossary(self, project_id: str, source: str, type: Union[str, GlossaryType], 
+                       translation: str, notes: str = "", 
+                       metadata: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+        """
+        创建新的术语表条目
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            source: 源语言术语原文
+            type: 术语类型（角色或普通术语）
+            translation: 目标语言翻译
+            notes: 术语翻译备注或说明
+            metadata: 术语元数据，存储额外信息
+            
+        Returns:
+            创建成功返回术语表数据字典，失败返回None
+        """
+        # 处理术语类型
+        if isinstance(type, GlossaryType):
+            type_str = type.value
+        else:
+            type_str = type
+            
+        glossary_data = {
+            "project_id": project_id,
+            "source": source,
+            "type": type_str,
+            "translation": translation,
+            "notes": notes,
+            "metadata": metadata or {}
+        }
+        
+        return self.cms.create_item("glossaries", glossary_data)
+    
+    def get_glossary(self, project_id: str, glossary_id: int) -> Optional[Dict[str, Any]]:
+        """
+        获取单个术语表条目
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            glossary_id: 术语表条目ID
+            
+        Returns:
+            成功返回术语表数据字典，失败返回None
+        """
+        return self.cms.get_item("glossaries", glossary_id)
+    
+    def get_glossary_by_source(self, project_id: str, source: str) -> Optional[Dict[str, Any]]:
+        """
+        根据源术语获取术语表条目
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            source: 源语言术语原文
+            
+        Returns:
+            成功返回术语表数据字典，失败返回None
+        """
+        query = f"filter[project_id][_eq]={project_id}&filter[source][_eq]={source}"
+        result = self.cms.get_items("glossaries", query)
+        
+        if isinstance(result, list) and len(result) > 0:
+            return result[0]
+        return None
+    
+    def update_glossary(self, project_id: str, glossary_id: int, **kwargs) -> Optional[Dict[str, Any]]:
+        """
+        更新术语表条目
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            glossary_id: 术语表条目ID
+            **kwargs: 要更新的术语表字段
+            
+        Returns:
+            更新成功返回术语表数据字典，失败返回None
+        """
+        return self.cms.update_item("glossaries", glossary_id, kwargs)
+    
+    def list_glossaries(self, project_id: str, limit: int = 25, offset: int = 0) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取术语表条目列表
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            limit: 返回记录数限制
+            offset: 偏移量
+            
+        Returns:
+            成功返回术语表数据列表，失败返回None
+        """
+        query = f"filter[project_id][_eq]={project_id}&limit={limit}&offset={offset}"
+        result = self.cms.get_items("glossaries", query)
+        return result if isinstance(result, list) else None
+    
+    def delete_glossary(self, project_id: str, glossary_id: int) -> bool:
+        """
+        删除术语表条目
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            glossary_id: 术语表条目ID
+            
+        Returns:
+            删除成功返回True，失败返回False
+        """
+        return self.cms.delete_item("glossaries", glossary_id)
+    
+    # ==================== 翻译相关操作 ====================
+    
+    def create_translation(self, project_id: str, chapter_id: int, stage: Union[str, TranslationStage], 
+                          content: str, validation: Dict[str, Any] = None,
+                          metadata: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+        """
+        创建新的翻译结果
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            chapter_id: 所属章节的唯一标识符
+            stage: 当前翻译所处的阶段
+            content: 翻译后的内容
+            validation: 翻译质量验证信息
+            metadata: 翻译元数据，存储额外信息
+            
+        Returns:
+            创建成功返回翻译数据字典，失败返回None
+        """
+        # 处理翻译阶段
+        if isinstance(stage, TranslationStage):
+            stage_str = stage.value
+        else:
+            stage_str = stage
+            
+        translation_data = {
+            "project_id": project_id,
+            "chapter_id": chapter_id,
+            "stage": stage_str,
+            "content": content,
+            "validation": validation or {},
+            "metadata": metadata or {}
+        }
+        
+        return self.cms.create_item("translations", translation_data)
+    
+    def get_translation(self, project_id: str, chapter_id: int, stage: Union[str, TranslationStage] = None) -> Optional[Dict[str, Any]]:
+        """
+        获取翻译结果
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            chapter_id: 所属章节的唯一标识符
+            stage: 翻译阶段（可选）
+            
+        Returns:
+            成功返回翻译数据字典，失败返回None
+        """
+        query = f"filter[project_id][_eq]={project_id}&filter[chapter_id][_eq]={chapter_id}"
+        
+        if stage:
+            # 处理翻译阶段
+            if isinstance(stage, TranslationStage):
+                stage_str = stage.value
+            else:
+                stage_str = stage
+            query += f"&filter[stage][_eq]={stage_str}"
+            
+        query += "&sort=-updated_at"  # 按更新时间降序排列，获取最新的翻译
+        
+        result = self.cms.get_items("translations", query)
+        
+        if isinstance(result, list) and len(result) > 0:
+            return result[0]
+        return None
+    
+    def update_translation(self, project_id: str, chapter_id: int, stage: Union[str, TranslationStage], **kwargs) -> Optional[Dict[str, Any]]:
+        """
+        更新翻译结果
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            chapter_id: 所属章节的唯一标识符
+            stage: 当前翻译所处的阶段
+            **kwargs: 要更新的翻译字段
+            
+        Returns:
+            更新成功返回翻译数据字典，失败返回None
+        """
+        # 先获取翻译ID
+        translation = self.get_translation(project_id, chapter_id, stage)
+        if not translation:
+            logger.error(f"未找到项目 {project_id} 章节 {chapter_id} 阶段 {stage} 的翻译")
             return None
-        return Chapter(
-            project_id=row["project_id"],
-            chapter_id=row["chapter_id"],
-            title=row["title"],
-            summary=row["summary"],
-            content=row["content"],
-            characters=_json_load(row["characters"], []),
-            terminology_keys=_json_load(row["terminology_keys"], []),
-            metadata=_json_load(row["metadata"], {}),
-        )
-
-    def list_chapters(self, project_id: str) -> List[Chapter]:
-        rows = self._conn.execute(
-            "SELECT * FROM chapters WHERE project_id = ? ORDER BY chapter_id",
-            (project_id,),
-        ).fetchall()
-        return [
-            Chapter(
-                project_id=row["project_id"],
-                chapter_id=row["chapter_id"],
-                title=row["title"],
-                summary=row["summary"],
-                content=row["content"],
-                characters=_json_load(row["characters"], []),
-                terminology_keys=_json_load(row["terminology_keys"], []),
-                metadata=_json_load(row["metadata"], {}),
-            )
-            for row in rows
-        ]
-
-    # Terminology
-    def upsert_terminology_entry(self, entry: TerminologyEntry) -> None:
-        self._conn.execute(
-            """
-            INSERT INTO terminology_entries (
-                entry_id, project_id, source_term, approved_translation,
-                variants, part_of_speech, notes, metadata
-            ) VALUES (
-                :entry_id, :project_id, :source_term, :approved_translation,
-                :variants, :part_of_speech, :notes, :metadata
-            ) ON CONFLICT(entry_id) DO UPDATE SET
-                project_id=excluded.project_id,
-                source_term=excluded.source_term,
-                approved_translation=excluded.approved_translation,
-                variants=excluded.variants,
-                part_of_speech=excluded.part_of_speech,
-                notes=excluded.notes,
-                metadata=excluded.metadata
-            """,
-            {
-                "entry_id": entry.entry_id,
-                "project_id": entry.project_id,
-                "source_term": entry.source_term,
-                "approved_translation": entry.approved_translation,
-                "variants": _json_dump(entry.variants),
-                "part_of_speech": entry.part_of_speech,
-                "notes": entry.notes,
-                "metadata": _json_dump(entry.metadata),
-            },
-        )
-        self._conn.commit()
-
-    def list_terminology(self, project_id: str) -> List[TerminologyEntry]:
-        rows = self._conn.execute(
-            """
-            SELECT * FROM terminology_entries
-            WHERE project_id = ?
-            ORDER BY source_term
-            """,
-            (project_id,),
-        ).fetchall()
-        return [
-            TerminologyEntry(
-                entry_id=row["entry_id"],
-                project_id=row["project_id"],
-                source_term=row["source_term"],
-                approved_translation=row["approved_translation"],
-                variants=_json_load(row["variants"], []),
-                part_of_speech=row["part_of_speech"],
-                notes=row["notes"],
-                metadata=_json_load(row["metadata"], {}),
-            )
-            for row in rows
-        ]
-
-    # Translation results
-    def upsert_translation_result(self, result: TranslationResult) -> None:
-        now_iso = _to_iso(utc_now())
-        created_iso = _to_iso(result.created_at)
-        self._conn.execute(
-            """
-            INSERT INTO translation_results (
-                project_id, chapter_id, stage, content,
-                validation, metadata, created_at, updated_at
-            ) VALUES (
-                :project_id, :chapter_id, :stage, :content,
-                :validation, :metadata, :created_at, :updated_at
-            ) ON CONFLICT(project_id, chapter_id, stage) DO UPDATE SET
-                content=excluded.content,
-                validation=excluded.validation,
-                metadata=excluded.metadata,
-                updated_at=excluded.updated_at
-            """,
-            {
-                "project_id": result.project_id,
-                "chapter_id": result.chapter_id,
-                "stage": result.stage.value,
-                "content": result.content,
-                "validation": _json_dump(result.validation),
-                "metadata": _json_dump(result.metadata),
-                "created_at": created_iso,
-                "updated_at": now_iso,
-            },
-        )
-        self._conn.commit()
-
-    def list_translation_results(self, project_id: str, chapter_id: str) -> List[TranslationResult]:
-        rows = self._conn.execute(
-            """
-            SELECT * FROM translation_results
-            WHERE project_id = ? AND chapter_id = ?
-            ORDER BY created_at
-            """,
-            (project_id, chapter_id),
-        ).fetchall()
-        return [self._row_to_translation_result(row) for row in rows]
-
-    def get_translation_result(
-        self,
-        project_id: str,
-        chapter_id: str,
-        stage: TranslationStage | str,
-    ) -> Optional[TranslationResult]:
-        stage_value = stage.value if isinstance(stage, TranslationStage) else stage
-        row = self._conn.execute(
-            """
-            SELECT * FROM translation_results
-            WHERE project_id = ? AND chapter_id = ? AND stage = ?
-            """,
-            (project_id, chapter_id, stage_value),
-        ).fetchone()
-        if not row:
-            return None
-        return self._row_to_translation_result(row)
-
-    def delete_translation_results(self, project_id: str, chapter_id: str) -> None:
-        self._conn.execute(
-            "DELETE FROM translation_results WHERE project_id = ? AND chapter_id = ?",
-            (project_id, chapter_id),
-        )
-        self._conn.commit()
-
-    def _row_to_translation_result(self, row: sqlite3.Row) -> TranslationResult:
-        created_at = _from_iso(row["created_at"]) or utc_now()
-        updated_at = _from_iso(row["updated_at"]) or created_at
-        return TranslationResult(
-            project_id=row["project_id"],
-            chapter_id=row["chapter_id"],
-            stage=TranslationStage(row["stage"]),
-            content=row["content"],
-            validation=_json_load(row["validation"], {}),
-            metadata=_json_load(row["metadata"], {}),
-            created_at=created_at,
-            updated_at=updated_at,
-        )
-
-    # Utilities
-    def attach_projects(self, projects: Iterable[Project]) -> None:
-        for project in projects:
-            self.upsert_project(project)
-
-    def attach_chapters(self, chapters: Iterable[Chapter]) -> None:
-        for chapter in chapters:
-            self.upsert_chapter(chapter)
-
-    def attach_terminology(self, entries: Iterable[TerminologyEntry]) -> None:
-        for entry in entries:
-            self.upsert_terminology_entry(entry)
+            
+        translation_id = translation.get("id")
+        return self.cms.update_item("translations", translation_id, kwargs)
+    
+    def list_translations(self, project_id: str, chapter_id: int = None, stage: Union[str, TranslationStage] = None,
+                         limit: int = 25, offset: int = 0) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取翻译结果列表
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            chapter_id: 所属章节的唯一标识符（可选）
+            stage: 翻译阶段（可选）
+            limit: 返回记录数限制
+            offset: 偏移量
+            
+        Returns:
+            成功返回翻译数据列表，失败返回None
+        """
+        query = f"filter[project_id][_eq]={project_id}"
+        
+        if chapter_id:
+            query += f"&filter[chapter_id][_eq]={chapter_id}"
+            
+        if stage:
+            # 处理翻译阶段
+            if isinstance(stage, TranslationStage):
+                stage_str = stage.value
+            else:
+                stage_str = stage
+            query += f"&filter[stage][_eq]={stage_str}"
+            
+        query += f"&limit={limit}&offset={offset}&sort=-updated_at"
+        
+        result = self.cms.get_items("translations", query)
+        return result if isinstance(result, list) else None
+    
+    def delete_translation(self, project_id: str, chapter_id: int, stage: Union[str, TranslationStage]) -> bool:
+        """
+        删除翻译结果
+        
+        Args:
+            project_id: 所属项目的唯一标识符
+            chapter_id: 所属章节的唯一标识符
+            stage: 当前翻译所处的阶段
+            
+        Returns:
+            删除成功返回True，失败返回False
+        """
+        # 先获取翻译ID
+        translation = self.get_translation(project_id, chapter_id, stage)
+        if not translation:
+            logger.error(f"未找到项目 {project_id} 章节 {chapter_id} 阶段 {stage} 的翻译")
+            return False
+            
+        translation_id = translation.get("id")
+        return self.cms.delete_item("translations", translation_id)

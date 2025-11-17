@@ -44,6 +44,7 @@ class Chapter:
     id: int  # 章节唯一标识符
     project_id: str  # 所属项目的唯一标识符
     title: str  # 章节标题
+    index: int  # 章节顺序索引，从1开始
     content: str  # 章节原始内容
     summary: str = ""  # 章节内容摘要
     characters: List[str] = field(default_factory=list)  # 章节中出现的角色列表
